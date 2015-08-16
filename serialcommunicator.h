@@ -127,4 +127,6 @@ public:
     void            printLastError() const;
 };
 
+
+
 #endif // SERIALCOMMUNICATOR_H
