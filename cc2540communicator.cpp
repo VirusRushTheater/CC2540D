@@ -6,7 +6,7 @@ CC2540Communicator::CC2540Communicator()
 {
 }
 
-size_t CC2540Communicator::sendCommand(TxOpcode opcode, std::vector<unsigned char> dataparams)
+size_t CC2540Communicator::txSendCommand(TxOpcode opcode, std::vector<unsigned char> dataparams)
 {
     unsigned char datalength = dataparams.size();
     std::vector<unsigned char> datasend;
@@ -18,7 +18,7 @@ size_t CC2540Communicator::sendCommand(TxOpcode opcode, std::vector<unsigned cha
     return send(datasend);
 }
 
-size_t CC2540Communicator::txInitCommand()
+int CC2540Communicator::txInitCommand()
 {
     /* BTool mimic:
     [1] : <Tx> - 04:52:52.802
@@ -37,16 +37,33 @@ size_t CC2540Communicator::txInitCommand()
     std::cout << "Sent init packet." << std::endl;
     #endif
 
-    return sendCommand(GAP_DeviceInit, std::vector<unsigned char>() <<
+    size_t sendret;
+
+    sendret = txSendCommand(GAP_DeviceInit, std::vector<unsigned char>() <<
                 BinarySender<1>(0x08) <<        // Profile role:    0x08 (Central)
                 BinarySender<1>(0x05) <<        // Max Scan Rsps:   0x05
                 BinarySender<16>(0x00) <<       // IRK: 16 zeroes
                 BinarySender<16>(0x00) <<       // CSRK: 16 zeroes
                 BinarySender<4>(0x00000001)     // SignCounter: 0x00 00 00 01
     );
+
+    // 0 bytes transferred
+    if(sendret == 0)
+    {
+        setError("Could not transfer the Initialization packet.");
+        return Tx_TxUnsuccessful;
+    }
+
+    // Waits for acknowledgement and retrieving information (2 Rx Packets)
+    return rxPacket();
 }
 
-unsigned char CC2540Communicator::rxPacket()
+int CC2540Communicator::rxPacket()
+{
+    return rxPacket(NULL);
+}
+
+int CC2540Communicator::rxPacket(std::vector<unsigned char>* rxdata)
 {
     /* BTool mimic:
     [2] : <Rx> - 04:52:52.878
@@ -66,7 +83,7 @@ unsigned char CC2540Communicator::rxPacket()
     if(recvpacket.size() < 6)
     {
         setError("Did not receive a message big enough to be successfully interpreted.");
-        return 1;
+        return Tx_RxTooShort;
     }
 
     recvpacket >> BinaryGrabber<1>(0, &evtype) >>
@@ -79,8 +96,8 @@ unsigned char CC2540Communicator::rxPacket()
 
     if(evtype != RX_TYPE_EVENT || evcode != RX_HCI_LE_EXTEVENT)
     {
-        setError("Received a malformed package.");
-        return 1;
+        setError("Received a malformed packet.");
+        return Tx_RxMalformed;
     }
 
     // There was an issue on receiving the package. It'll return an error code.
@@ -90,6 +107,13 @@ unsigned char CC2540Communicator::rxPacket()
         return retval;
     }
 
+    if(rxdata != NULL)
+    {
+        rxdata->clear();
+        rxdata->reserve(recvpacket.size());
+        rxdata->insert(rxdata->end(), recvpacket.begin(), recvpacket.end());
+    }
+
     switch(eventlabel)
     {
         // Acknowledgement. Other receiving packet should follow.
@@ -97,7 +121,7 @@ unsigned char CC2540Communicator::rxPacket()
             #ifdef CC2540_DEBUGMODE
             std::cout << "GAP_HCI_ExtentionCommandStatus (Acknowledgement). Other receiving packet should follow." << std::endl;
             #endif
-            return rxPacket();
+            return rxPacket(rxdata);
         break;
 
         // Init device done. We now know the hardware IDs of the USB dongle.
@@ -106,9 +130,17 @@ unsigned char CC2540Communicator::rxPacket()
             std::cout << "GAP_DeviceInitDone. Hardware IDs are now known." << std::endl;
             #endif
             rxInterpretDeviceInit(recvpacket);
-            return 0;
+            return Tx_Success;
+        break;
+        default:
+            #ifdef CC2540_DEBUGMODE
+            std::cout << "Unknown event." << std::endl;
+            #endif
+            return Tx_Success;
         break;
     }
+
+    return Tx_Success;
 }
 
 void CC2540Communicator::rxInterpretDeviceInit(std::vector<unsigned char> data)

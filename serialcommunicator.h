@@ -89,31 +89,40 @@ public:
     bool            init(uint16_t vendor, uint16_t product, int interface, uint8_t recv_endpoint_addr, uint8_t send_endpoint_addr);
 
     /**
-     * Opens two serial communication channels, one for sending and another for receiving.
-     * These are implemented with two independent threads.
-     * To stop them, use the method stopCommunication() any time.
+     * Opens a thread for concurrent receiving packages. The received packages are stored in an internal buffer, but not processed
+     * (To be implemented)
      */
     bool            turnOnAutomaticReceiving();
 
     /**
-     * Function to stop Serial communication. Makes you able to init this device again.
+     * Closes the thread for concurrent receiving packages opened by turnOnAutomaticReceiving(). (To be implemented)
      */
     bool            turnOffAutomaticReceiving();
 
     /**
-     * Function to send data to the device.
+     * Function to send data to the device. Returns the size of the data sent, or 0 if no data sent.
      */
-    size_t          send(std::vector<unsigned char> data);
     size_t          send(unsigned char* data, size_t length);
 
+    /**
+     * Alternative to be used with a std::vector.
+     */
+    size_t          send(std::vector<unsigned char> data);
 
+    /**
+     * Waits indefinitely for the device to give us packets. Returns a vector filled with that packet data if successful, or an empty vector if unsuccessful.
+     */
     std::vector<unsigned char> recv();
 
     /**
      * Locks the thread it's called in, until the USB device receives some data. The first just puts the retrieved data into the stack, and the second
-     * makes you able to retrieve it immediatly.
+     * makes you able to retrieve it immediatly. (To be implemented, if necessary)
      */
     std::vector<unsigned char>  recvlock();
+
+    /**
+     * Signals when a package arrives. Use it in inherited classes. (To be implemented, if necessary)
+     */
     virtual void                atReceiving(std::vector<unsigned char> data){}
 
     /**
