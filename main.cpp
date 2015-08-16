@@ -16,9 +16,7 @@ int main()
     {
         sc.init(0x0451, 0x16AA, 1, 0x84, 0x04);
         sc.txInitCommand();
-        sc.startCommunication();
-        sleep(2);
-        sc.stopCommunication();
+        sc.rxPacket();
     }
     catch(std::string p)
     {

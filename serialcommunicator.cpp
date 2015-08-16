@@ -38,7 +38,7 @@ SerialCommunicator::SerialCommunicator() :
 
 SerialCommunicator::~SerialCommunicator()
 {
-    stopCommunication();
+    turnOffAutomaticReceiving();
     if(_usbhandle)
         libusb_close(_usbhandle);
     libusb_exit(_usbctx);
@@ -205,7 +205,7 @@ bool SerialCommunicator::init(uint16_t vendor, uint16_t product, int interface, 
     return true;
 }
 
-bool SerialCommunicator::startCommunication()
+bool SerialCommunicator::turnOnAutomaticReceiving()
 {
     if(!_device_ready)
     {
@@ -220,7 +220,7 @@ bool SerialCommunicator::startCommunication()
     return true;
 }
 
-bool SerialCommunicator::stopCommunication()
+bool SerialCommunicator::turnOffAutomaticReceiving()
 {
     pthread_mutex_lock(&_comm_bool_mutex);
     _communicating = false;
@@ -339,43 +339,59 @@ size_t SerialCommunicator::send(std::vector<unsigned char> data)
 
 size_t SerialCommunicator::send(unsigned char *data, size_t length)
 {
-    //if(checkIfItIsCommunicating())
-    if(1)
+    int bytes_transferred;
+    int retval = libusb_bulk_transfer(_usbhandle, _send_endpoint_addr, data, length, &bytes_transferred, 0);
+    switch(retval)
     {
-        int bytes_transferred;
-        int retval = libusb_bulk_transfer(_usbhandle, _send_endpoint_addr, data, length, &bytes_transferred, 0);
-        switch(retval)
-        {
-            case 0:
-                return bytes_transferred;
-            break;
-            case LIBUSB_ERROR_PIPE:
-                setError("The endpoint halted when trying to send.");
-                return 0;
-            break;
-            case LIBUSB_ERROR_NO_DEVICE:
-                setError("The device has been disconnected. The communication has stopped.");
-                stopCommunication();
-                return 0;
-            break;
-            default:
-                setError("Unknown error when trying to send data.");
-                return 0;
-            break;
-        }
-    }
-    else
-    {
-        setError("You haven't started communication yet. Use startCommunication() to do this.");
-        return 0;
+        case 0:
+            return bytes_transferred;
+        break;
+        case LIBUSB_ERROR_PIPE:
+            setError("The endpoint halted when trying to send.");
+            return 0;
+        break;
+        case LIBUSB_ERROR_NO_DEVICE:
+            setError("The device has been disconnected. The communication has stopped.");
+            turnOffAutomaticReceiving();
+            return 0;
+        break;
+        default:
+            setError("Unknown error when trying to send data.");
+            return 0;
+        break;
     }
 }
 
 std::vector<unsigned char> SerialCommunicator::recv()
 {
     unsigned char* recvdata =   new unsigned char[RECV_BUFFER_SIZE];
-    int bytes_transferred;
-    int retusb = libusb_bulk_transfer(_usbhandle, _recv_endpoint_addr, recvdata, RECV_BUFFER_SIZE, &bytes_transferred, 0);
+    int bytes_transferred = 0;
+    int retusb;
+
+    do
+    {
+        retusb = libusb_bulk_transfer(_usbhandle, _recv_endpoint_addr, recvdata, RECV_BUFFER_SIZE, &bytes_transferred, 500);
+    } while(retusb == LIBUSB_ERROR_TIMEOUT);
+
+    switch(retusb)
+    {
+        case 0:
+            //Success.
+        break;
+        case LIBUSB_ERROR_PIPE:
+            setError("The endpoint halted when trying to send.");
+            return std::vector<unsigned char>();
+        break;
+        case LIBUSB_ERROR_NO_DEVICE:
+            setError("The device has been disconnected. The communication has stopped.");
+            turnOffAutomaticReceiving();
+            return std::vector<unsigned char>();
+        break;
+        default:
+            setError("Unknown error when trying to send data.");
+            return std::vector<unsigned char>();
+        break;
+    }
 
     std::vector<unsigned char> retval = std::vector<unsigned char>(&(recvdata[0]), &(recvdata[bytes_transferred]));
 

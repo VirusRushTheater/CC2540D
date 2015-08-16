@@ -93,12 +93,12 @@ public:
      * These are implemented with two independent threads.
      * To stop them, use the method stopCommunication() any time.
      */
-    bool            startCommunication();
+    bool            turnOnAutomaticReceiving();
 
     /**
      * Function to stop Serial communication. Makes you able to init this device again.
      */
-    bool            stopCommunication();
+    bool            turnOffAutomaticReceiving();
 
     /**
      * Function to send data to the device.
