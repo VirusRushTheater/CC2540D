@@ -1,6 +1,8 @@
-#ifndef BinarySender_H
-#define BinarySender_H
+#ifndef BINARYPARAMETER_H
+#define BINARYPARAMETER_H
 
+#include <iterator>
+#include <ostream>
 #include <vector>
 #include <cstring>
 
@@ -35,7 +37,7 @@ struct BinaryGrabber
 };
 
 template <unsigned int bitAmount>
-std::vector<unsigned char> operator<< (const std::vector<unsigned char> vec, BinarySender<bitAmount> p8b)
+std::vector<unsigned char> operator << (const std::vector<unsigned char> vec, BinarySender<bitAmount> p8b)
 {
     std::vector<unsigned char> retval;
     retval.reserve(vec.size() + bitAmount);
@@ -45,11 +47,11 @@ std::vector<unsigned char> operator<< (const std::vector<unsigned char> vec, Bin
 }
 
 template <unsigned int bitAmount>
-std::vector<unsigned char> operator>> (const std::vector<unsigned char> vec, BinaryGrabber<bitAmount> p8b)
+std::vector<unsigned char> operator >> (const std::vector<unsigned char> vec, BinaryGrabber<bitAmount> p8b)
 {
     const unsigned char* vecdata = vec.data();
     memcpy(p8b.destination, &(vecdata[p8b.position]), bitAmount);
     return vec;
 }
 
-#endif // BinarySender_H
+#endif // BINARYPARAMETER_H

@@ -4,7 +4,6 @@
 
 #include "serialcommunicator.h"
 #include "cc2540communicator.h"
-#include "binaryparameter.h"
 
 using namespace std;
 
@@ -16,11 +15,12 @@ int main()
     {
         sc.init(0x0451, 0x16AA, 1, 0x84, 0x04);
         sc.txInitCommand();
-
+        sc.txDeviceDiscovery();
     }
     catch(std::string p)
     {
         sc.printLastError();
+        return 1;
     }
 
     return 0;

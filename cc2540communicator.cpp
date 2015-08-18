@@ -18,46 +18,6 @@ size_t CC2540Communicator::txSendCommand(TxOpcode opcode, std::vector<unsigned c
     return send(datasend);
 }
 
-int CC2540Communicator::txInitCommand()
-{
-    /* BTool mimic:
-    [1] : <Tx> - 04:52:52.802
-    -Type       : 0x01 (Command)
-    -Opcode     : 0xFE00 (GAP_DeviceInit)
-    -Data Length    : 0x26 (38) byte(s)
-     ProfileRole    : 0x04 (Peripheral)
-     MaxScanRsps    : 0x05 (5)
-     IRK        : 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
-     CSRK       : 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
-     SignCounter    : 0x00000001 (1)
-     */
-
-
-    #ifdef CC2540_DEBUGMODE
-    std::cout << "Sent init packet." << std::endl;
-    #endif
-
-    size_t sendret;
-
-    sendret = txSendCommand(GAP_DeviceInit, std::vector<unsigned char>() <<
-                BinarySender<1>(0x08) <<        // Profile role:    0x08 (Central)
-                BinarySender<1>(0x05) <<        // Max Scan Rsps:   0x05
-                BinarySender<16>(0x00) <<       // IRK: 16 zeroes
-                BinarySender<16>(0x00) <<       // CSRK: 16 zeroes
-                BinarySender<4>(0x00000001)     // SignCounter: 0x00 00 00 01
-    );
-
-    // 0 bytes transferred
-    if(sendret == 0)
-    {
-        setError("Could not transfer the Initialization packet.");
-        return Tx_TxUnsuccessful;
-    }
-
-    // Waits for acknowledgement and retrieving information (2 Rx Packets)
-    return rxPacket();
-}
-
 int CC2540Communicator::rxPacket()
 {
     return rxPacket(NULL);
@@ -75,7 +35,8 @@ int CC2540Communicator::rxPacket(std::vector<unsigned char>* rxdata)
      [What follows depends on the Event]
      */
 
-    std::vector<unsigned char> recvpacket = recv();
+    std::vector<unsigned char> recvpacket;
+    recvpacket = recv();
     unsigned char   evtype, evcode, datalen, retval;
     unsigned short  eventno;
     RxEvent         eventlabel;
@@ -132,6 +93,23 @@ int CC2540Communicator::rxPacket(std::vector<unsigned char>* rxdata)
             rxInterpretDeviceInit(recvpacket);
             return Tx_Success;
         break;
+
+        // In a discovery attempt, we discovered a device.
+        case GAP_DeviceInformation:
+            #ifdef CC2540_DEBUGMODE
+            std::cout << "GAP_DeviceInformation." << std::endl;
+            #endif
+            rxInterpretDeviceInformation(recvpacket);
+
+            rxPacket(rxdata);
+        break;
+
+        case GAP_DeviceDiscoveryDone:
+            #ifdef CC2540_DEBUGMODE
+            std::cout << "GAP_DeviceDiscoveryDone. Discovered " << _discovered_devices.size() << " devices." << std::endl;
+            #endif
+        break;
+
         default:
             #ifdef CC2540_DEBUGMODE
             std::cout << "Unknown event." << std::endl;
@@ -141,6 +119,46 @@ int CC2540Communicator::rxPacket(std::vector<unsigned char>* rxdata)
     }
 
     return Tx_Success;
+}
+
+int CC2540Communicator::txInitCommand()
+{
+    /* BTool mimic:
+    [1] : <Tx> - 04:52:52.802
+    -Type       : 0x01 (Command)
+    -Opcode     : 0xFE00 (GAP_DeviceInit)
+    -Data Length    : 0x26 (38) byte(s)
+     ProfileRole    : 0x04 (Peripheral)
+     MaxScanRsps    : 0x05 (5)
+     IRK        : 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
+     CSRK       : 00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00
+     SignCounter    : 0x00000001 (1)
+     */
+
+
+    #ifdef CC2540_DEBUGMODE
+    std::cout << "Sent init packet." << std::endl;
+    #endif
+
+    size_t sendret;
+
+    sendret = txSendCommand(GAP_DeviceInit, std::vector<unsigned char>() <<
+                BinarySender<1>(0x08) <<        // Profile role:    0x08 (Central)
+                BinarySender<1>(0x05) <<        // Max Scan Rsps:   0x05
+                BinarySender<16>(0x00) <<       // IRK: 16 zeroes
+                BinarySender<16>(0x00) <<       // CSRK: 16 zeroes
+                BinarySender<4>(0x00000001)     // SignCounter: 0x00 00 00 01
+    );
+
+    // 0 bytes transferred
+    if(sendret == 0)
+    {
+        setError("Could not transfer the Initialization packet.");
+        return Tx_TxUnsuccessful;
+    }
+
+    // Waits for acknowledgement and retrieving information (2 Rx Packets)
+    return rxPacket();
 }
 
 void CC2540Communicator::rxInterpretDeviceInit(std::vector<unsigned char> data)
@@ -166,4 +184,53 @@ void CC2540Communicator::rxInterpretDeviceInit(std::vector<unsigned char> data)
     data >> BinaryGrabber<6>(6, _device_mac_reversed) >>
             BinaryGrabber<16>(15, _device_irk) >>
             BinaryGrabber<16>(31, _device_csrk);
+}
+
+std::vector<MacAddress> CC2540Communicator::txDeviceDiscovery()
+{
+    #ifdef CC2540_DEBUGMODE
+    std::cout << "Sent device discovery." << std::endl;
+    #endif
+
+    size_t sendret;
+
+    sendret = txSendCommand(GAP_DeviceDiscoveryRequest, std::vector<unsigned char>() <<
+                BinarySender<1>(0x03) <<        // Scan for all devices.
+                BinarySender<1>(0x01) <<        // Turn on Name Discovery
+                BinarySender<1>(0x00)           // Don't use White list.
+    );
+
+    // 0 bytes transferred
+    if(sendret == 0)
+    {
+        setError("Could not transfer the Device Discovery packet.");
+        return std::vector<MacAddress>();
+    }
+
+    _discovered_devices.clear();
+
+    // Waits for acknowledgement and retrieving information (2 Rx Packets)
+    rxPacket();
+    return getDiscoveredDevices();
+}
+
+void CC2540Communicator::rxInterpretDeviceInformation(std::vector<unsigned char> data){
+    MacAddress      dev_address;
+    unsigned char   event_type;
+
+    data >> BinaryGrabber<6>(8, &(dev_address.addr)) >>
+            BinaryGrabber<1>(6, &event_type);
+
+    if(event_type == 0x04)  // It's a scan response.
+    {
+        _discovered_devices.push_back(dev_address);
+        #ifdef CC2540_DEBUGMODE
+        std::cout << "Discovered a device." << std::endl;
+        #endif
+    }
+}
+
+std::vector<MacAddress> CC2540Communicator::getDiscoveredDevices() const
+{
+    return std::vector<MacAddress>(_discovered_devices);
 }

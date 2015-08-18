@@ -6,7 +6,7 @@
 #include <unistd.h>
 #include <csignal>
 
-#define     LIBUSB_DEBUG_OUTPUT
+//#define     LIBUSB_DEBUG_OUTPUT
 
 #define     RECV_BUFFER_SIZE        260
 
