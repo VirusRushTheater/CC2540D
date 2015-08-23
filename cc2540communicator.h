@@ -47,6 +47,7 @@ enum RxEvent
     GAP_DeviceInitDone                  = 0x0600,
     GAP_DeviceDiscoveryDone             = 0x0601,
     GAP_EstablishLink                   = 0x0605,
+    GAP_TerminateLink                   = 0x0606,
     GAP_LinkParamUpdate                 = 0x0607,
     GAP_DeviceInformation               = 0x060D,
     GAP_HCI_ExtentionCommandStatus      = 0x067F
@@ -55,6 +56,15 @@ enum RxEvent
 struct MacAddress
 {
     unsigned char addr[6];
+    std::string toString() const;
+};
+
+struct LinkInfo
+{
+    bool            link_set;
+    MacAddress      dev_address;
+    unsigned char   dev_addr_type, clock_accuracy;
+    unsigned short  conn_handle, conn_interval, conn_latency, conn_timeout;
 };
 
 class CC2540Communicator : public SerialCommunicator
@@ -69,6 +79,7 @@ private:
 
     void            rxInterpretDeviceInit(std::vector<unsigned char> data);
     void            rxInterpretDeviceInformation(std::vector<unsigned char> data);
+    void            rxInterpretEstablishLink(std::vector<unsigned char> data, LinkInfo *linforeturner);
 
 public:
     CC2540Communicator();
@@ -97,8 +108,8 @@ public:
     /**
      * Establishes a communication Link with a remote device.
      */
-    int             txEstablishLink(MacAddress remoteDevice);
-    int             txTerminateLink();
+    LinkInfo        txEstablishLink(MacAddress remoteDevice);
+    int             txTerminateLinkRequest(LinkInfo remoteLink);
 
     /**
      * Gets the addresses of the BLE devices discovered previously with txDeviceDiscovery().

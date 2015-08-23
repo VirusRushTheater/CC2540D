@@ -2,6 +2,22 @@
 #include "binaryparameter.h"
 #include <iostream>
 
+std::string MacAddress::toString() const
+{
+    char tempbuffer[4];
+    std::string retval;
+
+    sprintf(tempbuffer, "%02X", addr[5]);
+    retval.append(tempbuffer);
+    for(int i = 1; i < 6; i++)
+    {
+        sprintf(tempbuffer, ":%02X", addr[5-i]);
+        retval.append(tempbuffer);
+    }
+
+    return retval;
+}
+
 CC2540Communicator::CC2540Communicator()
 {
 }
@@ -64,7 +80,11 @@ int CC2540Communicator::rxPacket(std::vector<unsigned char>* rxdata)
     // There was an issue on receiving the package. It'll return an error code.
     if(retval != 0)
     {
-        setError("Issue receiving the package.");
+        if(retval == 0x11)
+            return retval;
+            //setError("Already performing a similar task.");
+        else
+            setError("Issue receiving the package.");
         return retval;
     }
 
@@ -107,6 +127,22 @@ int CC2540Communicator::rxPacket(std::vector<unsigned char>* rxdata)
         case GAP_DeviceDiscoveryDone:
             #ifdef CC2540_DEBUGMODE
             std::cout << "GAP_DeviceDiscoveryDone. Discovered " << _discovered_devices.size() << " devices." << std::endl;
+            #endif
+        break;
+
+        case GAP_EstablishLink:
+            #ifdef CC2540_DEBUGMODE
+            std::cout << "GAP_EstablishLink. Established link with a device." << std::endl;
+            #endif
+            return Tx_Success;
+        break;
+
+        case GAP_TerminateLink:
+            unsigned short term_handle;
+            recvpacket >> BinaryGrabber<2>(6, &term_handle);
+
+            #ifdef CC2540_DEBUGMODE
+            std::cout << "GAP_TerminateLink. Terminated link with a device. (handle: " << term_handle << ")" << std::endl;
             #endif
         break;
 
@@ -233,4 +269,110 @@ void CC2540Communicator::rxInterpretDeviceInformation(std::vector<unsigned char>
 std::vector<MacAddress> CC2540Communicator::getDiscoveredDevices() const
 {
     return std::vector<MacAddress>(_discovered_devices);
+}
+
+LinkInfo CC2540Communicator::txEstablishLink(MacAddress remoteDevice)
+{
+    /*[18] : <Tx> - 09:04:43.276
+    -Type		: 0x01 (Command)
+    -Opcode		: 0xFE09 (GAP_EstablishLinkRequest)
+    -Data Length	: 0x09 (9) byte(s)
+     HighDutyCycle	: 0x00 (Disable)
+     WhiteList		: 0x00 (Disable)
+     AddrTypePeer	: 0x00 (Public)
+     PeerAddr		: 7A:1D:A0:E5:C5:78
+    Dump(Tx):
+    01 09 FE 09 00 00 00 7A 1D A0 E5 C5 78 */
+
+    #ifdef CC2540_DEBUGMODE
+    std::cout << "Sent establish link request to Device " << remoteDevice.toString() << std::endl;
+    #endif
+
+    std::vector<unsigned char> rxdata;
+    size_t sendret, recvret;
+    LinkInfo retval;
+    retval.link_set = false;
+
+    std::vector<unsigned char> senddata = std::vector<unsigned char>() <<
+                                          BinarySender<1>(0x00) <<        // High Duty Cyle: Disable (0x00)
+                                          BinarySender<1>(0x00) <<        // White List: Disable (0x00)
+                                          BinarySender<1>(0x00);           // Address Type Peer: Public (0x00)
+
+    senddata.insert(senddata.end(), &(remoteDevice.addr[0]), &(remoteDevice.addr[6]));
+
+    sendret = txSendCommand(GAP_EstablishLinkRequest, senddata);
+
+    // 0 bytes transferred
+    if(sendret == 0)
+    {
+        setError("Could not try to establish a Establish Link request.");
+        return retval;
+    }
+
+    // Waits for acknowledgement and retrieving information (2 Rx Packets)
+    recvret = rxPacket(&rxdata);
+    if(recvret == 0x11)
+    {
+        std::cout << "Already doing that. Try send a Terminate Link Request signal before doing this again." << std::endl;
+        return retval;
+    }
+    else if(recvret != 0x00)
+    {
+        std::cout << "There was an unidentified problem trying to establish a link with the device " << remoteDevice.toString() << std::endl;
+        return retval;
+    }
+
+    // Success! Interpret the thing and let's go.
+    rxInterpretEstablishLink(rxdata, &retval);
+    retval.link_set = true;
+
+    return retval;
+}
+
+int CC2540Communicator::txTerminateLinkRequest(LinkInfo remoteLink)
+{
+    if(!remoteLink.link_set)
+    {
+        #ifdef CC2540_DEBUGMODE
+        std::cout << "The supplied Connection Info was not set." << std::endl;
+        #endif
+        return Tx_TxUnsuccessful;
+    }
+
+    #ifdef CC2540_DEBUGMODE
+    std::cout << "Sent a Terminate Link Request signal (MAC: " << remoteLink.dev_address.toString() << ", handle: " << remoteLink.conn_handle << ")" << std::endl;
+    #endif
+
+    size_t sendret;
+
+    sendret = txSendCommand(GAP_TerminateLinkRequest, std::vector<unsigned char>() <<
+                BinarySender<2>(remoteLink.conn_handle) <<        // Connection handle for the established link.
+                BinarySender<1>(0x13)                             // Reason: Remote User Terminated Connection
+    );
+
+    // 0 bytes transferred
+    if(sendret == 0)
+    {
+        setError("Could not transfer the Terminate Link Request packet.");
+        return Tx_TxUnsuccessful;
+    }
+
+    // Waits for acknowledgement and retrieving information (2 Rx Packets)
+    return rxPacket();
+}
+
+void CC2540Communicator::rxInterpretEstablishLink(std::vector<unsigned char> data, LinkInfo *linforeturner)
+{
+
+    data >> BinaryGrabber<6>(7, &(linforeturner->dev_address.addr)) >>
+            BinaryGrabber<1>(6, &(linforeturner->dev_addr_type)) >>
+            BinaryGrabber<2>(13, &(linforeturner->conn_handle)) >>
+            BinaryGrabber<2>(15, &(linforeturner->conn_interval)) >>
+            BinaryGrabber<2>(17, &(linforeturner->conn_latency)) >>
+            BinaryGrabber<2>(19, &(linforeturner->conn_timeout)) >>
+            BinaryGrabber<1>(20, &(linforeturner->clock_accuracy));
+
+    #ifdef CC2540_DEBUGMODE
+    std::cout << "Established link with device " << linforeturner->dev_address.toString() << " (handle: " << linforeturner->conn_handle << ")" << std::endl;
+    #endif
 }
